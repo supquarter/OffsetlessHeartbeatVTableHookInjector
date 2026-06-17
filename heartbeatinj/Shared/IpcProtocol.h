@@ -2,9 +2,9 @@
 #include <cstdint>
 #include <cstring>
 
-#define IPC_SHARED_MEM_NAME L"Global\\RBX_SIPC_Mem"
-#define IPC_EVENT_CMD_NAME  L"Global\\RBX_SIPC_Cmd"
-#define IPC_EVENT_RES_NAME  L"Global\\RBX_SIPC_Res"
+#define IPC_SHARED_MEM_NAME L"Local\\RBX_SIPC_Mem"
+#define IPC_EVENT_CMD_NAME  L"Local\\RBX_SIPC_Cmd"
+#define IPC_EVENT_RES_NAME  L"Local\\RBX_SIPC_Res"
 #define IPC_BUFFER_SIZE     65536
 #define IPC_DATA_OFFSET     16
 #define IPC_MAX_SCRIPT      (IPC_BUFFER_SIZE - IPC_DATA_OFFSET - 4096)

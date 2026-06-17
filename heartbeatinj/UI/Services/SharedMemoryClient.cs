@@ -9,9 +9,9 @@ namespace InjectorUI
 {
     public class SharedMemoryClient : IDisposable
     {
-        private const string MemName = "Global\\RBX_SIPC_Mem";
-        private const string EventCmdName = "Global\\RBX_SIPC_Cmd";
-        private const string EventResName = "Global\\RBX_SIPC_Res";
+        private const string MemName = "Local\\RBX_SIPC_Mem";
+        private const string EventCmdName = "Local\\RBX_SIPC_Cmd";
+        private const string EventResName = "Local\\RBX_SIPC_Res";
         private const int BufferSize = 65536;
         private const int DataOffset = 16;
         private const int MaxOutput = 4096;
