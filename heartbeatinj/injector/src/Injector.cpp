@@ -144,20 +144,17 @@ int main() {
     g_DllPath = (std::filesystem::current_path() / "module.dll").string();
     if (!std::filesystem::exists(g_DllPath)) {
         printf("[-] module.dll not found at %s\n", g_DllPath.c_str());
-        system("pause");
         return 1;
     }
 
     g_pid = GetPid("RobloxPlayerBeta.exe");
     if (!g_pid) {
         printf("[-] RobloxPlayerBeta.exe not found.\n");
-        system("pause");
         return 1;
     }
 
     if (!ensure_proc_handle()) {
         printf("[-] No valid process handle, exiting.\n");
-        system("pause");
         return 1;
     }
 
@@ -168,7 +165,6 @@ int main() {
 
     if (mods.size() < 5 || !mods[0].modBaseAddr || !mods[1].modBaseAddr) {
         printf("[-] Failed to enumerate modules.\n");
-        system("pause");
         return 1;
     }
 
@@ -186,7 +182,6 @@ int main() {
 
     if (!pcmgrInst) {
         printf("[-] Could not find PlayerListManager.\n");
-        system("pause");
         return 1;
     }
 
