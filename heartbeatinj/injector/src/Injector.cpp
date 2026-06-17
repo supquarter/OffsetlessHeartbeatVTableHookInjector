@@ -18,15 +18,11 @@ uintptr_t Hook(uintptr_t a1, uintptr_t a2, uintptr_t a3) {
         auto& e = n->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
         if (e.Size)
             s->AddTab((PRUNTIME_FUNCTION)((BYTE*)d + e.VirtualAddress), e.Size / sizeof(RUNTIME_FUNCTION), (DWORD64)d);
-
         auto i = (PIMAGE_IMPORT_DESCRIPTOR)(d + s->ImpVA);
         auto ie = (PIMAGE_IMPORT_DESCRIPTOR)((uint8_t*)i + s->ImpSz);
         while (i < ie && i->Name) {
             HMODULE l = s->Ldr((char*)(d + i->Name));
-            if (!l) {
-                ++i;
-                continue;
-            }
+            if (!l) { ++i; continue; }
             uintptr_t* t = (uintptr_t*)(d + (i->OriginalFirstThunk ? i->OriginalFirstThunk : i->FirstThunk));
             FARPROC* f = (FARPROC*)(d + i->FirstThunk);
             for (; *t; ++t, ++f) {
@@ -37,14 +33,12 @@ uintptr_t Hook(uintptr_t a1, uintptr_t a2, uintptr_t a3) {
             }
             ++i;
         }
-
         if (s->TlsVA && s->TlsSz) {
             auto t = (IMAGE_TLS_DIRECTORY64*)(d + s->TlsVA);
             ULONGLONG rv = t->AddressOfCallBacks;
             if (rv) {
                 uintptr_t c = (uintptr_t)rv;
-                if (c < d || c >= s->dllEd)
-                    c = d + (uintptr_t)rv;
+                if (c < d || c >= s->dllEd) c = d + (uintptr_t)rv;
                 PIMAGE_TLS_CALLBACK* cl = (PIMAGE_TLS_CALLBACK*)c;
                 for (size_t i = 0;; ++i) {
                     if (!cl[i]) break;
@@ -58,96 +52,38 @@ uintptr_t Hook(uintptr_t a1, uintptr_t a2, uintptr_t a3) {
     return s->OrgHook(a1, a2, a3);
 }
 
-bool IsReadablePtr(HANDLE h, uintptr_t addr) {
-    if (addr < 0x10000 || addr >= 0x7FFFFFFFFFFF) return false;
-    MEMORY_BASIC_INFORMATION mbi;
-    if (!VirtualQueryEx(h, (LPCVOID)addr, &mbi, sizeof(mbi))) return false;
-    return mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_GUARD) &&
-        (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE));
-}
-
-uintptr_t FindPlayerListManager(HANDLE process_handle, uintptr_t rbBase, uintptr_t rbSize) {
+uintptr_t FindHeartbeatJob(HANDLE process_handle) {
     SYSTEM_INFO sys_info;
     GetSystemInfo(&sys_info);
 
     uintptr_t start_address = (uintptr_t)sys_info.lpMinimumApplicationAddress;
     uintptr_t end_address = (uintptr_t)sys_info.lpMaximumApplicationAddress;
-
     MEMORY_BASIC_INFORMATION mbi;
 
-    printf("[*] Scanning memory for PlayerListManager (class 'Players')...\n");
-    int regionsChecked = 0;
-    const size_t CHUNK = 0x10000; // 64KB chunks
-
-    std::vector<BYTE> buffer(CHUNK);
-
     while (start_address < end_address) {
-        if (!VirtualQueryEx(process_handle, (LPCVOID)start_address, &mbi, sizeof(mbi))) {
-            start_address += 0x1000;
-            continue;
-        }
-
-        if (!(mbi.State == MEM_COMMIT) || !(mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE)) || (mbi.Protect & PAGE_GUARD)) {
-            start_address += mbi.RegionSize;
-            continue;
-        }
-
-        size_t region_size = mbi.RegionSize;
-        if (region_size > 0x4000000) region_size = 0x4000000; // cap at 64MB
-
-        uintptr_t region_base = start_address;
-        for (size_t offset = 0; offset < region_size; offset += CHUNK) {
-            size_t read_size = CHUNK;
-            if (read_size > region_size - offset) read_size = region_size - offset;
-            if (read_size < 0x100) continue;
-
-            if (!g_Syscall.SyscallRead(process_handle, region_base + offset, buffer.data(), read_size))
-                continue;
-
-            for (size_t i = 0; i < read_size - 0x80; i += 8) {
-                uintptr_t inst = *reinterpret_cast<uintptr_t*>(&buffer[i]);
-                if (inst < 0x10000 || inst >= 0x7FFFFFFFFFFF) continue;
-
-                uintptr_t classDesc = 0;
-                if (!g_Syscall.SyscallRead(process_handle, inst + 0x18, &classDesc, sizeof(classDesc)))
-                    continue;
-                if (classDesc < 0x10000 || classDesc >= 0x7FFFFFFFFFFF) continue;
-
-                char className[32] = { 0 };
-                if (!g_Syscall.SyscallRead(process_handle, classDesc + 0x08, className, sizeof(className)))
-                    continue;
-
-                if (strcmp(className, "Players") != 0) continue;
-
-                uintptr_t parent = 0;
-                g_Syscall.SyscallRead(process_handle, inst + 0x70, &parent, sizeof(parent));
-                if (parent >= 0x10000 && parent < 0x7FFFFFFFFFFF) {
-                    uintptr_t parentCD = 0;
-                    if (g_Syscall.SyscallRead(process_handle, parent + 0x18, &parentCD, sizeof(parentCD))) {
-                        char parentName[32] = { 0 };
-                        if (g_Syscall.SyscallRead(process_handle, parentCD + 0x08, parentName, sizeof(parentName))) {
-                            if (strcmp(parentName, "DataModel") == 0) {
-                                printf("[+] Found PlayerListManager at 0x%p (parent: DataModel)\n", (void*)inst);
-                                return inst;
+        if (VirtualQueryEx(process_handle, (LPCVOID)start_address, &mbi, sizeof(mbi))) {
+            if ((mbi.State == MEM_COMMIT) && (mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE)) && !(mbi.Protect & PAGE_GUARD)) {
+                size_t region_size = mbi.RegionSize;
+                std::vector<BYTE> buffer(region_size);
+                if (g_Syscall.SyscallRead(process_handle, start_address, buffer.data(), region_size)) {
+                    for (size_t i = 0; i < region_size - 0x80; i += 8) {
+                        uintptr_t potential_ptr = *reinterpret_cast<uintptr_t*>(&buffer[i]);
+                        if (potential_ptr >= 0x10000 && potential_ptr < 0x7FFFFFFFFFFF) {
+                            char possible_name[32]{ 0 };
+                            if (g_Syscall.SyscallRead(process_handle, potential_ptr + 0x18, possible_name, sizeof(possible_name))) {
+                                if (strcmp(possible_name, "Heartbeat") == 0) {
+                                    return potential_ptr;
+                                }
                             }
                         }
                     }
                 }
-
-                printf("[*] Found 'Players' instance at 0x%p, using it\n", (void*)inst);
-                return inst;
             }
+            start_address += mbi.RegionSize;
+        } else {
+            start_address += 0x1000;
         }
-
-        regionsChecked++;
-        if (regionsChecked % 25 == 0) {
-            printf("[*] Scanned %d regions, currently at 0x%p...\n", regionsChecked, (void*)start_address);
-        }
-
-        start_address += mbi.RegionSize;
     }
-
-    printf("[-] Could not find PlayerListManager after scanning %d regions.\n", regionsChecked);
     return 0;
 }
 
@@ -185,26 +121,28 @@ int main() {
 
     uintptr_t deBase = (uintptr_t)mods[0].modBaseAddr;
     uintptr_t rbBase = (uintptr_t)mods[1].modBaseAddr;
-    uintptr_t rbSize = mods[1].modBaseSize;
     uintptr_t kbBase = (uintptr_t)mods[2].modBaseAddr;
     uintptr_t k3Base = (uintptr_t)mods[3].modBaseAddr;
     uintptr_t ntBase = (uintptr_t)mods[4].modBaseAddr;
 
-    printf("[+] RobloxPlayerBeta.exe: 0x%p (size: 0x%X)\n", (void*)rbBase, rbSize);
+    printf("[+] RobloxPlayerBeta.exe: 0x%p (size: 0x%X)\n", (void*)rbBase, mods[1].modBaseSize);
     printf("[+] devenum.dll: 0x%p\n", (void*)deBase);
 
-    uintptr_t pcmgrInst = FindPlayerListManager(g_process, rbBase, rbSize);
+    printf("[*] Scanning memory for Heartbeat job...\n");
+    uintptr_t hbkJ = FindHeartbeatJob(g_process);
 
-    if (!pcmgrInst) {
-        printf("[-] Could not find PlayerListManager.\n");
+    if (!hbkJ) {
+        printf("[-] Could not find Heartbeat job address.\n");
         return 1;
     }
 
-    uintptr_t oVab = Read<uintptr_t>(pcmgrInst);
-    printf("[+] PlayerListManager VTable: 0x%p\n", (void*)oVab);
+    printf("[+] Heartbeat job address found: 0x%p\n", (void*)hbkJ);
 
-    uintptr_t oStep = Read<uintptr_t>(oVab + 8);
-    printf("[+] Original step function: 0x%p\n", (void*)oStep);
+    uintptr_t oVab = Read<uintptr_t>(hbkJ);
+    printf("[+] Heartbeat VTable address: 0x%p\n", (void*)oVab);
+
+    uintptr_t oHbk = Read<uintptr_t>(oVab + 8);
+    printf("[+] Original Heartbeat function: 0x%p\n", (void*)oHbk);
 
     uintptr_t nVab = Alloc(0x300, PAGE_READWRITE);
     if (!nVab) {
@@ -233,17 +171,16 @@ int main() {
     Write<uintptr_t>(nVab + 8, deBase);
 
     Shared loc = {};
-    loc.OrgHook = (fHbk)oStep;
+    loc.OrgHook = (fHbk)oHbk;
     loc.LdrEx = (fLdrEx)GetProc(kbBase, "LoadLibraryExA");
     loc.Ldr = (fLdr)GetProc(k3Base, "LoadLibraryA");
     loc.Proc = (fProc)GetProc(k3Base, "GetProcAddress");
     loc.AddTab = (fTab)GetProc(ntBase, "RtlAddFunctionTable");
     loc.Status = State::Load;
-    loc.PcmgrInst = pcmgrInst;
     Write(g_Shared, &loc, sizeof(Shared));
 
-    Write<uintptr_t>(pcmgrInst, nVab);
-    printf("[+] PlayerListManager vtable redirected. Waiting for hook to fire...\n");
+    Write<uintptr_t>(hbkJ, nVab);
+    printf("[+] Heartbeat vtable redirected. Waiting for hook to fire...\n");
 
     MODULEENTRY32 msme = {};
     while (!msme.modBaseAddr) {
@@ -254,7 +191,6 @@ int main() {
     Prot(msBase, msme.modBaseSize, PAGE_EXECUTE_READWRITE);
     z = std::vector<BYTE>(msme.modBaseSize, 0);
     Write(msBase, z.data(), z.size());
-    printf("[+] mshtml.dll at 0x%p, size 0x%X\n", (void*)msBase, msme.modBaseSize);
 
     g_DllBase = msBase;
     g_DllSz = DllSz(g_DllPath);
@@ -263,7 +199,7 @@ int main() {
     mapr::Map(g_DllPath);
     mapr::Inj();
 
-    Write<uintptr_t>(pcmgrInst, oVab);
+    Write<uintptr_t>(hbkJ, oVab);
     printf("[+] Original vtable restored. Injection complete.\n");
 
     return 0;
