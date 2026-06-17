@@ -5,15 +5,6 @@
 #include "Mapper/Mapper.hpp"
 #include "Defs.hpp"
 
-
-// NOTE: THIS CODE IS NOT MINE, THIS IS X4V'S HEARTBEAT INJECTOR, IT USED OFFSETS (taskschedulerptr, jobs) and i just made it offsetless + driverless
-
-// creds to x4v for the heartbeat src i heavily modified it to be driverless and offsetless
-
-// my discord: atreluted, x4v's discord: nuvq
-
-// THX, PLEASE STAR THE GITHUB AND SHARE IT
-
 uintptr_t Hook(uintptr_t a1, uintptr_t a2, uintptr_t a3) {
     auto s = (Shared*)0x100000000;
     if (s->Status == State::Load) {
@@ -64,9 +55,18 @@ uintptr_t Hook(uintptr_t a1, uintptr_t a2, uintptr_t a3) {
         ((BOOL(__stdcall*)(HMODULE, DWORD, LPVOID))(s->dllEp))((HMODULE)d, DLL_PROCESS_ATTACH, nullptr);
         s->Status = State::Done;
     }
-    return s->OrgHbk(a1, a2, a3);
+    return s->OrgHook(a1, a2, a3);
 }
-uintptr_t FindHeartbeatJob(HANDLE process_handle) {
+
+bool IsReadablePtr(HANDLE h, uintptr_t addr) {
+    if (addr < 0x10000 || addr >= 0x7FFFFFFFFFFF) return false;
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!VirtualQueryEx(h, (LPCVOID)addr, &mbi, sizeof(mbi))) return false;
+    return mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_GUARD) &&
+        (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE));
+}
+
+uintptr_t FindPlayerListManager(HANDLE process_handle, uintptr_t rbBase, uintptr_t rbSize) {
     SYSTEM_INFO sys_info;
     GetSystemInfo(&sys_info);
 
@@ -74,6 +74,9 @@ uintptr_t FindHeartbeatJob(HANDLE process_handle) {
     uintptr_t end_address = (uintptr_t)sys_info.lpMaximumApplicationAddress;
 
     MEMORY_BASIC_INFORMATION mbi;
+
+    printf("[*] Scanning memory for PlayerListManager (class name 'Players')...\n");
+    int regionsChecked = 0;
 
     while (start_address < end_address) {
         if (VirtualQueryEx(process_handle, (LPCVOID)start_address, &mbi, sizeof(mbi))) {
@@ -83,82 +86,132 @@ uintptr_t FindHeartbeatJob(HANDLE process_handle) {
 
                 if (g_Syscall.SyscallRead(process_handle, start_address, buffer.data(), region_size)) {
                     for (size_t i = 0; i < region_size - 0x80; i += 8) {
-                        uintptr_t potential_ptr = *reinterpret_cast<uintptr_t*>(&buffer[i]);
+                        uintptr_t inst = *reinterpret_cast<uintptr_t*>(&buffer[i]);
 
-                        if (potential_ptr >= 0x10000 && potential_ptr < 0x7FFFFFFFFFFF) {
-                            char possible_name[32]{ 0 };
-                            if (g_Syscall.SyscallRead(process_handle, potential_ptr + 0x18, possible_name, sizeof(possible_name))) {
-                                if (strcmp(possible_name, "Heartbeat") == 0) {
-                                    return potential_ptr; // Returns the address of the Heartbeat job object
+                        if (inst < 0x10000 || inst >= 0x7FFFFFFFFFFF) continue;
+
+                        uintptr_t classDesc = 0;
+                        if (!g_Syscall.SyscallRead(process_handle, inst + 0x18, &classDesc, sizeof(classDesc)))
+                            continue;
+
+                        if (classDesc < 0x10000 || classDesc >= 0x7FFFFFFFFFFF) continue;
+
+                        char className[32] = { 0 };
+                        if (!g_Syscall.SyscallRead(process_handle, classDesc + 0x08, className, sizeof(className)))
+                            continue;
+
+                        if (strcmp(className, "Players") != 0) continue;
+
+                        uintptr_t parent = 0;
+                        g_Syscall.SyscallRead(process_handle, inst + 0x70, &parent, sizeof(parent));
+                        if (parent >= 0x10000 && parent < 0x7FFFFFFFFFFF) {
+                            uintptr_t parentCD = 0;
+                            if (g_Syscall.SyscallRead(process_handle, parent + 0x18, &parentCD, sizeof(parentCD))) {
+                                char parentName[32] = { 0 };
+                                if (g_Syscall.SyscallRead(process_handle, parentCD + 0x08, parentName, sizeof(parentName))) {
+                                    if (strcmp(parentName, "DataModel") == 0) {
+                                        printf("[+] Found PlayerListManager at 0x%p (parent: DataModel)\n", (void*)inst);
+                                        return inst;
+                                    }
                                 }
                             }
                         }
+
+                        printf("[*] Found 'Players' instance at 0x%p (parent not DataModel, checking anyway)\n", (void*)inst);
+                        return inst;
                     }
+                }
+                regionsChecked++;
+                if (regionsChecked % 50 == 0) {
+                    printf("[*] Scanned %d regions...\n", regionsChecked);
                 }
             }
             start_address += mbi.RegionSize;
-        }
-        else {
+        } else {
             start_address += 0x1000;
         }
     }
+
+    printf("[-] Could not find PlayerListManager after scanning %d regions.\n", regionsChecked);
     return 0;
 }
+
 unsigned long g_pid = 0;
 unsigned long g_old = 0;
 void* g_process = nullptr;
+
 int main() {
     g_DllPath = (std::filesystem::current_path() / "module.dll").string();
-    if (!std::filesystem::exists(g_DllPath)) return 0;
-    g_pid = GetPid("RobloxPlayerBeta.exe");
-    if (!g_pid) return 0;
-
-    if (!ensure_proc_handle())
-    {
-        printf("no valid process handle, exiting");
+    if (!std::filesystem::exists(g_DllPath)) {
+        printf("[-] module.dll not found at %s\n", g_DllPath.c_str());
+        system("pause");
         return 1;
     }
+
+    g_pid = GetPid("RobloxPlayerBeta.exe");
+    if (!g_pid) {
+        printf("[-] RobloxPlayerBeta.exe not found.\n");
+        system("pause");
+        return 1;
+    }
+
+    if (!ensure_proc_handle()) {
+        printf("[-] No valid process handle, exiting.\n");
+        system("pause");
+        return 1;
+    }
+
+    printf("[+] Roblox PID: %u\n", g_pid);
 
     std::vector<MODULEENTRY32> mods;
     GetMods(g_pid, { "devenum.dll", "RobloxPlayerBeta.exe", "KERNELBASE.dll", "KERNEL32.dll", "ntdll.dll" }, mods);
 
-    if (mods.size() < 5 || !mods[0].modBaseAddr || !mods[1].modBaseAddr) return 0;
+    if (mods.size() < 5 || !mods[0].modBaseAddr || !mods[1].modBaseAddr) {
+        printf("[-] Failed to enumerate modules.\n");
+        system("pause");
+        return 1;
+    }
 
     uintptr_t deBase = (uintptr_t)mods[0].modBaseAddr;
     uintptr_t rbBase = (uintptr_t)mods[1].modBaseAddr;
+    uintptr_t rbSize = mods[1].modBaseSize;
     uintptr_t kbBase = (uintptr_t)mods[2].modBaseAddr;
     uintptr_t k3Base = (uintptr_t)mods[3].modBaseAddr;
     uintptr_t ntBase = (uintptr_t)mods[4].modBaseAddr;
 
-    printf("[+] Scanning memory for Heartbeat job...\n");
-    uintptr_t hbkJ = FindHeartbeatJob(g_process);
+    printf("[+] RobloxPlayerBeta.exe: 0x%p (size: 0x%X)\n", (void*)rbBase, rbSize);
+    printf("[+] devenum.dll: 0x%p\n", (void*)deBase);
 
-    if (!hbkJ) {
-        printf("[-] Could not find Heartbeat job address.\n");
+    uintptr_t pcmgrInst = FindPlayerListManager(g_process, rbBase, rbSize);
+
+    if (!pcmgrInst) {
+        printf("[-] Could not find PlayerListManager.\n");
         system("pause");
-        return 0;
+        return 1;
     }
 
-    printf("[+] Heartbeat job address found: 0x%p\n", (void*)hbkJ);
+    uintptr_t oVab = Read<uintptr_t>(pcmgrInst);
+    printf("[+] PlayerListManager VTable: 0x%p\n", (void*)oVab);
 
-    uintptr_t oVab = Read<uintptr_t>(hbkJ);
-
-    printf("[+] Heartbeat VTable address: 0x%p\n", (void*)oVab);
-
-    uintptr_t oHbk = Read<uintptr_t>(oVab + 8);
+    uintptr_t oStep = Read<uintptr_t>(oVab + 8);
+    printf("[+] Original step function: 0x%p\n", (void*)oStep);
 
     uintptr_t nVab = Alloc(0x300, PAGE_READWRITE);
-
-    if (!nVab) return 0;
+    if (!nVab) {
+        printf("[-] Failed to allocate fake vtable.\n");
+        return 1;
+    }
 
     for (uintptr_t i = 0; i < 0x300; i += 8) {
-
         Write<uintptr_t>(nVab + i, Read<uintptr_t>(oVab + i));
-
     }
 
     g_Shared = Alloc(sizeof(Shared), PAGE_READWRITE);
-    if (!g_Shared) return 0;
+    if (!g_Shared) {
+        printf("[-] Failed to allocate Shared struct.\n");
+        return 1;
+    }
+
     Prot(deBase, 0x1000, PAGE_EXECUTE_READWRITE);
     std::vector<BYTE> z(0x1000, 0);
     Write(deBase, z.data(), z.size());
@@ -168,15 +221,19 @@ int main() {
     Write(deBase, sc.data(), sc.size());
 
     Write<uintptr_t>(nVab + 8, deBase);
+
     Shared loc = {};
-    loc.OrgHbk = (fHbk)oHbk;
+    loc.OrgHook = (fHbk)oStep;
     loc.LdrEx = (fLdrEx)GetProc(kbBase, "LoadLibraryExA");
     loc.Ldr = (fLdr)GetProc(k3Base, "LoadLibraryA");
     loc.Proc = (fProc)GetProc(k3Base, "GetProcAddress");
     loc.AddTab = (fTab)GetProc(ntBase, "RtlAddFunctionTable");
     loc.Status = State::Load;
+    loc.PcmgrInst = pcmgrInst;
     Write(g_Shared, &loc, sizeof(Shared));
-    Write<uintptr_t>(hbkJ, nVab);
+
+    Write<uintptr_t>(pcmgrInst, nVab);
+    printf("[+] PlayerListManager vtable redirected. Waiting for hook to fire...\n");
 
     MODULEENTRY32 msme = {};
     while (!msme.modBaseAddr) {
@@ -187,6 +244,7 @@ int main() {
     Prot(msBase, msme.modBaseSize, PAGE_EXECUTE_READWRITE);
     z = std::vector<BYTE>(msme.modBaseSize, 0);
     Write(msBase, z.data(), z.size());
+    printf("[+] mshtml.dll at 0x%p, size 0x%X\n", (void*)msBase, msme.modBaseSize);
 
     g_DllBase = msBase;
     g_DllSz = DllSz(g_DllPath);
@@ -194,7 +252,9 @@ int main() {
     SH(dllEd, g_DllBase + g_DllSz);
     mapr::Map(g_DllPath);
     mapr::Inj();
-    Write<uintptr_t>(hbkJ, oVab);
+
+    Write<uintptr_t>(pcmgrInst, oVab);
+    printf("[+] Original vtable restored. Injection complete.\n");
 
     return 0;
 }

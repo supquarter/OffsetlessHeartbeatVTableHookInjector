@@ -130,6 +130,7 @@
       <LanguageStandard_C>stdclatest</LanguageStandard_C>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
+      <AdditionalIncludeDirectories>..\Shared;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -140,6 +141,7 @@
     <ClInclude Include="src\Defs.hpp" />
     <ClInclude Include="src\Mapper\Mapper.hpp" />
     <ClInclude Include="src\Memory\Memory.hpp" />
+    <ClInclude Include="..\Shared\IpcProtocol.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Injector.cpp" />

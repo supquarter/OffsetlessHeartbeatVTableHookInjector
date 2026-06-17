@@ -13,6 +13,18 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="IPC">
+      <UniqueIdentifier>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Luau">
+      <UniqueIdentifier>{B2C3D4E5-F6A7-8901-BCDE-F12345678901}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Hooks">
+      <UniqueIdentifier>{C3D4E5F6-A7B8-9012-CDEF-123456789012}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shared">
+      <UniqueIdentifier>{D4E5F6A7-B8C9-0123-DEF1-234567890123}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework.h">
@@ -20,6 +32,27 @@
     </ClInclude>
     <ClInclude Include="pch.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Shared\IpcProtocol.h">
+      <Filter>Shared</Filter>
+    </ClInclude>
+    <ClInclude Include="IPC\SharedMemory.hpp">
+      <Filter>IPC</Filter>
+    </ClInclude>
+    <ClInclude Include="Luau\Offsets.hpp">
+      <Filter>Luau</Filter>
+    </ClInclude>
+    <ClInclude Include="Luau\Structs.hpp">
+      <Filter>Luau</Filter>
+    </ClInclude>
+    <ClInclude Include="Luau\State.hpp">
+      <Filter>Luau</Filter>
+    </ClInclude>
+    <ClInclude Include="Luau\Executor.hpp">
+      <Filter>Luau</Filter>
+    </ClInclude>
+    <ClInclude Include="Hooks\PrintHook.hpp">
+      <Filter>Hooks</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

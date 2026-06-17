@@ -134,6 +134,8 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <AdditionalIncludeDirectories>..\..\Shared;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -144,6 +146,13 @@
   <ItemGroup>
     <ClInclude Include="framework.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="..\..\Shared\IpcProtocol.h" />
+    <ClInclude Include="IPC\SharedMemory.hpp" />
+    <ClInclude Include="Luau\Offsets.hpp" />
+    <ClInclude Include="Luau\Structs.hpp" />
+    <ClInclude Include="Luau\State.hpp" />
+    <ClInclude Include="Luau\Executor.hpp" />
+    <ClInclude Include="Hooks\PrintHook.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp" />

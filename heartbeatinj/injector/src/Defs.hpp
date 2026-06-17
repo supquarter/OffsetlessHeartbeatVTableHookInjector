@@ -1,5 +1,7 @@
 #pragma once
 #include <Windows.h>
+#include "IpcProtocol.h"
+
 using fHbk = uintptr_t(__fastcall*)(uintptr_t, uintptr_t, uintptr_t);
 using fLdrEx = HMODULE(__stdcall*)(LPCSTR, HANDLE, DWORD);
 using fLdr = HMODULE(__stdcall*)(LPCSTR);
@@ -11,13 +13,14 @@ using fTab = BOOLEAN(__cdecl*)(PRUNTIME_FUNCTION, DWORD, DWORD64);
 enum class State { Load, Wait, Inject, Done };
 
 struct Shared {
-    fHbk OrgHbk;
+    fHbk OrgHook;
     fLdrEx LdrEx;
     fLdr Ldr;
     fProc Proc;
     fTab AddTab;
     uintptr_t dllSt, dllEd, dllEp, ExcVA, ExcSz, ImpVA, ImpSz, TlsVA, TlsSz;
     State Status;
+    uintptr_t PcmgrInst;
 };
 
 using u8 = unsigned char;

@@ -1,0 +1,30 @@
+# Build outputs
+build/
+*/x64/
+*/Release/
+*/Debug/
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.obj
+*.log
+*.tlog
+*.ipdb
+*.iobj
+*.exp
+*.lib
+*.recipe
+
+# UI build
+UI/bin/
+UI/obj/
+UI/WebView2Cache/
+
+# VS
+.vs/
+*.user
+*.suo
+
+# PCH
+*.pch
