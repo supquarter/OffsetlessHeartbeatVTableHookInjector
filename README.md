@@ -4,13 +4,13 @@ Offsetless, driverless Roblox injector using PlayerListManager vtable hooking wi
 
 ## Features
 
-- **Offsetless** — scans memory for PlayerListManager by class name (`"Players"`), no hardcoded addresses
-- **Driverless** — uses NT syscall trampolines for RPM/WPM, no kernel driver
-- **Manual mapping** — module DLL loaded via manual map into `mshtml.dll` memory
-- **Script execution** — execute Luau source or bytecode inside Roblox
-- **Print capture** — hooks `luaB_print` to capture script output
-- **IPC** — shared memory + event-based communication between UI and module
-- **Monaco editor** — WPF + WebView2 with Luau syntax highlighting and autocomplete
+- **Offsetless**: scans memory for PlayerListManager by class name (`"Players"`), no hardcoded addresses
+- **Driverless**: uses NT syscall trampolines for RPM/WPM, no kernel driver
+- **Manual mapping**: module DLL loaded via manual map into `mshtml.dll` memory
+- **Script execution**: execute Luau source or bytecode inside Roblox
+- **Print capture**: hooks `luaB_print` to capture script output
+- **IPC**: shared memory + event-based communication between UI and module
+- **Monaco editor**: WPF + WebView2 with Luau syntax highlighting and autocomplete
 
 ## Components
 
