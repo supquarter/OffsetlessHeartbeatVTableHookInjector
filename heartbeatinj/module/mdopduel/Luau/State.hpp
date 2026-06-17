@@ -22,14 +22,8 @@ static uintptr_t DecodePointer(uintptr_t encoded) {
     return encoded;
 }
 
-template<typename T>
-static T DecodePtr(T encoded) {
-    return (T)DecodePointer((uintptr_t)encoded);
-}
-
 static global_State* FindGlobalState() {
     if (g_GState) return g_GState;
-
     g_RobloxBase = (uintptr_t)GetModuleHandle(NULL);
     if (!g_RobloxBase) return nullptr;
 
@@ -37,31 +31,22 @@ static global_State* FindGlobalState() {
     auto getGlobalState = (GetGlobalStateFn)Functions::GetGlobalState;
     if (!getGlobalState) return nullptr;
 
-    __try {
-        g_GState = getGlobalState();
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER) {
-        return nullptr;
-    }
+    __try { g_GState = getGlobalState(); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
 
-    if (g_GState) {
+    if (g_GState)
         memcpy(g_PtrEncKey, (void*)((uintptr_t)g_GState + 0x538), sizeof(g_PtrEncKey));
-    }
 
     return g_GState;
 }
 
 static CosmicState* FindLuaState() {
     if (!FindGlobalState()) return nullptr;
-
     __try {
         auto mt = g_GState->mainthread;
-        if (mt && mt->tt > 0 && mt->tt < 10) {
-            return mt;
-        }
+        if (mt && mt->tt > 0 && mt->tt < 10) return mt;
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {}
-
     return nullptr;
 }
 
@@ -69,13 +54,8 @@ static uintptr_t GetLuaStateViaFunction() {
     using GetLuaStateFn = uintptr_t(*)();
     auto fn = (GetLuaStateFn)Functions::GetLuaState;
     if (!fn) return 0;
-
-    __try {
-        return fn();
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER) {
-        return 0;
-    }
+    __try { return fn(); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
 }
 
 static bool Initialize() {

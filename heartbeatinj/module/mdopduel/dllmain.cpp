@@ -1,6 +1,4 @@
 #include "pch.h"
-#include <thread>
-#include <string>
 #include "IPC/SharedMemory.hpp"
 #include "Luau/State.hpp"
 #include "Luau/Executor.hpp"
@@ -8,17 +6,20 @@
 #include "Luau/Structs.hpp"
 #include "Hooks/PrintHook.hpp"
 
-static bool g_Running = true;
+static volatile LONG g_Running = 1;
 
-void IpcWorkerThread() {
+DWORD WINAPI IpcWorkerThread(LPVOID) {
+    char scriptBuf[IPC_MAX_SCRIPT + 1];
+    uint32_t scriptSize;
+    uint32_t scriptType;
+
     while (g_Running) {
-        IPC::ScriptRequest req = IPC::WaitForScript(2000);
-        if (req.Script.empty()) continue;
+        if (!IPC::WaitForScript(scriptBuf, &scriptSize, &scriptType, 2000))
+            continue;
 
         CosmicState* L = Luau::FindLuaState();
-        if (!L) {
+        if (!L)
             L = (CosmicState*)Luau::GetLuaStateViaFunction();
-        }
 
         if (!L) {
             IPC::SendError("Failed to find Lua state");
@@ -26,33 +27,38 @@ void IpcWorkerThread() {
         }
 
         int result = -1;
-        if (req.Type == ScriptType::Source) {
-            result = Luau::ExecuteSource(L, req.Script.c_str(), "=UI_Script");
-        } else if (req.Type == ScriptType::Bytecode) {
-            result = Luau::ExecuteBytecode(L, (const uint8_t*)req.Script.c_str(), req.Script.size(), "=UI_Bytecode");
+        if (scriptType == (uint32_t)ScriptType::Source) {
+            result = Luau::ExecuteSource(L, scriptBuf, "=UI_Script");
+        } else if (scriptType == (uint32_t)ScriptType::Bytecode) {
+            result = Luau::ExecuteBytecode(L, (const uint8_t*)scriptBuf, scriptSize, "=UI_Bytecode");
         }
 
-        std::string output = Luau::GetOutput();
-        if (result != 0 && output.empty()) {
-            IPC::SendError("Script execution returned code " + std::to_string(result));
+        const char* output = Luau::GetOutput();
+        uint32_t outLen = Luau::g_OutputLen;
+
+        if (result != 0 && outLen == 0) {
+            char errBuf[64];
+            int len = sprintf_s(errBuf, sizeof(errBuf), "Script failed with code %d", result);
+            IPC::SendOutput(errBuf, len > 0 ? (uint32_t)len : 0);
         } else {
-            IPC::SendOutput(output);
+            IPC::SendOutput(output, outLen);
         }
     }
+    return 0;
 }
 
 void InitializeModule() {
-    bool ipcReady = IPC::Create();
-    bool luauReady = Luau::Initialize();
-    bool printHooked = Hooks::Install();
-
-    if (ipcReady && luauReady) {
-        std::thread ipcThread(IpcWorkerThread);
-        ipcThread.detach();
+    if (!IPC::Create()) return;
+    if (!Luau::Initialize()) {
+        IPC::SendError("Luau init failed");
+        return;
     }
+    Hooks::Install();
+    CreateThread(NULL, 0, IpcWorkerThread, NULL, 0, NULL);
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
+    (void)lpReserved;
     switch (ul_reason_for_call) {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hModule);
@@ -63,7 +69,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         }, NULL, 0, NULL);
         break;
     case DLL_PROCESS_DETACH:
-        g_Running = false;
+        InterlockedExchange(&g_Running, 0);
         Hooks::Remove();
         IPC::Destroy();
         break;

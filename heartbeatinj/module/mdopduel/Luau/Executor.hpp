@@ -2,14 +2,16 @@
 #include <Windows.h>
 #include <cstdint>
 #include <cstring>
-#include <string>
+#include <cstdio>
 #include "State.hpp"
 #include "Structs.hpp"
 #include "Offsets.hpp"
+#include "IpcProtocol.h"
 
 namespace Luau {
 
-static std::string g_OutputBuffer;
+static char g_OutputBuffer[IPC_MAX_OUTPUT];
+static uint32_t g_OutputLen = 0;
 
 static int CompileAndLoad_L(CosmicState* L, const char* source, const char* chunkname) {
     using loadsafe_fn = int(*)(CosmicState*, const char*, const char*);
@@ -19,12 +21,8 @@ static int CompileAndLoad_L(CosmicState* L, const char* source, const char* chun
 }
 
 static int CompileAndLoad(CosmicState* L, const char* source, const char* chunkname) {
-    __try {
-        return CompileAndLoad_L(L, source, chunkname);
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER) {
-        return -1;
-    }
+    __try { return CompileAndLoad_L(L, source, chunkname); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return -1; }
 }
 
 static int ExecuteDirect_L(CosmicState* L) {
@@ -35,82 +33,75 @@ static int ExecuteDirect_L(CosmicState* L) {
 }
 
 static int ExecuteDirect(CosmicState* L) {
-    __try {
-        return ExecuteDirect_L(L);
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER) {
-        return -1;
-    }
+    __try { return ExecuteDirect_L(L); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return -1; }
 }
 
 static int ExecuteSource(CosmicState* L, const char* source, const char* chunkname) {
-    g_OutputBuffer.clear();
+    g_OutputLen = 0;
+    g_OutputBuffer[0] = 0;
 
     int loadResult = CompileAndLoad(L, source, chunkname);
     if (loadResult != 0) {
-        g_OutputBuffer = "[Load error: ";
-        g_OutputBuffer += std::to_string(loadResult);
-        g_OutputBuffer += "]";
+        sprintf_s(g_OutputBuffer, sizeof(g_OutputBuffer), "[Load error: %d]", loadResult);
+        g_OutputLen = (uint32_t)strlen(g_OutputBuffer);
         return loadResult;
     }
 
     int execResult = ExecuteDirect(L);
-    if (execResult != 0 && g_OutputBuffer.empty()) {
-        g_OutputBuffer = "[Exec error: ";
-        g_OutputBuffer += std::to_string(execResult);
-        g_OutputBuffer += "]";
+    if (execResult != 0 && g_OutputLen == 0) {
+        sprintf_s(g_OutputBuffer, sizeof(g_OutputBuffer), "[Exec error: %d]", execResult);
+        g_OutputLen = (uint32_t)strlen(g_OutputBuffer);
     }
     return execResult;
 }
 
 static void PushOutput(const char* str, size_t len) {
-    g_OutputBuffer.append(str, len);
-    g_OutputBuffer += '\n';
+    if (g_OutputLen + len + 2 > sizeof(g_OutputBuffer)) return;
+    memcpy(g_OutputBuffer + g_OutputLen, str, len);
+    g_OutputLen += (uint32_t)len;
+    g_OutputBuffer[g_OutputLen++] = '\n';
+    g_OutputBuffer[g_OutputLen] = 0;
 }
 
-static std::string GetOutput() {
-    std::string out = g_OutputBuffer;
-    g_OutputBuffer.clear();
-    return out;
+static void PushOutputInt(int val) {
+    char buf[32];
+    int n = sprintf_s(buf, sizeof(buf), "%d", val);
+    if (n > 0) PushOutput(buf, n);
 }
 
-static int ExecuteBytecode_L(CosmicState* L, const uint8_t* bytecode, size_t size, const char* chunkname) {
-    using luaVMLoad_fn = int(*)(CosmicState*, const char*, const char*, size_t, int);
-    auto luaVMLoad = (luaVMLoad_fn)Functions::LuaVMLoad;
-    if (!luaVMLoad) return -2;
-    return luaVMLoad(L, chunkname, (const char*)bytecode, size, 0);
-}
+static const char* GetOutput() { return g_OutputBuffer; }
 
 static int TryLoadBytecode(CosmicState* L, const uint8_t* bytecode, size_t size, const char* chunkname) {
     __try {
-        return ExecuteBytecode_L(L, bytecode, size, chunkname);
+        using luaVMLoad_fn = int(*)(CosmicState*, const char*, const char*, size_t, int);
+        auto luaVMLoad = (luaVMLoad_fn)Functions::LuaVMLoad;
+        if (!luaVMLoad) return -2;
+        return luaVMLoad(L, chunkname, (const char*)bytecode, size, 0);
     }
-    __except (EXCEPTION_EXECUTE_HANDLER) {
-        return -1;
-    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return -1; }
 }
 
 static int ExecuteBytecode(CosmicState* L, const uint8_t* bytecode, size_t size, const char* chunkname) {
-    g_OutputBuffer.clear();
+    g_OutputLen = 0;
+    g_OutputBuffer[0] = 0;
 
     int loadResult = TryLoadBytecode(L, bytecode, size, chunkname);
-
     if (loadResult == -2) {
-        g_OutputBuffer = "[Error: LuaVMLoad not available]";
+        sprintf_s(g_OutputBuffer, sizeof(g_OutputBuffer), "[Error: LuaVMLoad not available]");
+        g_OutputLen = (uint32_t)strlen(g_OutputBuffer);
         return -1;
     }
     if (loadResult != 0) {
-        g_OutputBuffer = "[BC Load error: ";
-        g_OutputBuffer += std::to_string(loadResult);
-        g_OutputBuffer += "]";
+        sprintf_s(g_OutputBuffer, sizeof(g_OutputBuffer), "[BC Load error: %d]", loadResult);
+        g_OutputLen = (uint32_t)strlen(g_OutputBuffer);
         return loadResult;
     }
 
     int execResult = ExecuteDirect(L);
-    if (execResult != 0 && g_OutputBuffer.empty()) {
-        g_OutputBuffer = "[BC Exec error: ";
-        g_OutputBuffer += std::to_string(execResult);
-        g_OutputBuffer += "]";
+    if (execResult != 0 && g_OutputLen == 0) {
+        sprintf_s(g_OutputBuffer, sizeof(g_OutputBuffer), "[BC Exec error: %d]", execResult);
+        g_OutputLen = (uint32_t)strlen(g_OutputBuffer);
     }
     return execResult;
 }

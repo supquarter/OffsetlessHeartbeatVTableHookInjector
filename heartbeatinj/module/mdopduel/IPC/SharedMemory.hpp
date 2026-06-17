@@ -1,7 +1,8 @@
 #pragma once
 #include <Windows.h>
 #include <cstdint>
-#include <string>
+#include <cstring>
+#include <cstdio>
 #include "IpcProtocol.h"
 
 namespace IPC {
@@ -13,18 +14,12 @@ static HANDLE g_hEventRes = nullptr;
 
 static bool Create() {
     g_hMapFile = CreateFileMappingW(
-        INVALID_HANDLE_VALUE,
-        NULL,
-        PAGE_READWRITE,
-        0,
-        IPC_BUFFER_SIZE,
-        IPC_SHARED_MEM_NAME
-    );
+        INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
+        0, IPC_BUFFER_SIZE, IPC_SHARED_MEM_NAME);
     if (!g_hMapFile) {
         DWORD err = GetLastError();
-        if (err == ERROR_ALREADY_EXISTS) {
+        if (err == ERROR_ALREADY_EXISTS)
             g_hMapFile = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, IPC_SHARED_MEM_NAME);
-        }
     }
     if (!g_hMapFile) return false;
 
@@ -35,14 +30,12 @@ static bool Create() {
     g_pIpc->Fields.Status = (uint32_t)IpcStatus::Idle;
 
     g_hEventCmd = CreateEventW(NULL, FALSE, FALSE, IPC_EVENT_CMD_NAME);
-    if (!g_hEventCmd) {
+    if (!g_hEventCmd)
         g_hEventCmd = OpenEventW(EVENT_ALL_ACCESS, FALSE, IPC_EVENT_CMD_NAME);
-    }
 
     g_hEventRes = CreateEventW(NULL, FALSE, FALSE, IPC_EVENT_RES_NAME);
-    if (!g_hEventRes) {
+    if (!g_hEventRes)
         g_hEventRes = OpenEventW(EVENT_ALL_ACCESS, FALSE, IPC_EVENT_RES_NAME);
-    }
 
     return g_hMapFile && g_pIpc && g_hEventCmd && g_hEventRes;
 }
@@ -54,49 +47,35 @@ static void Destroy() {
     if (g_hEventRes) { CloseHandle(g_hEventRes); g_hEventRes = nullptr; }
 }
 
-struct ScriptRequest {
-    std::string Script;
-    ScriptType Type;
-};
+static int WaitForScript(char* outScript, uint32_t* outSize, uint32_t* outType, DWORD timeoutMs) {
+    DWORD waitResult = WaitForSingleObject(g_hEventCmd, timeoutMs);
+    if (waitResult != WAIT_OBJECT_0) return 0;
 
-static ScriptRequest WaitForScript(DWORD timeoutMs = INFINITE) {
-    ScriptRequest req;
-
-    while (true) {
-        DWORD waitResult = WaitForSingleObject(g_hEventCmd, timeoutMs);
-        if (waitResult != WAIT_OBJECT_0) {
-            req.Script = "";
-            return req;
-        }
-
-        if (g_pIpc->Fields.Status == (uint32_t)IpcStatus::CmdPending) {
-            uint32_t size = g_pIpc->Fields.ScriptSize;
-            if (size > IPC_MAX_SCRIPT) size = IPC_MAX_SCRIPT;
-
-            req.Script.assign((const char*)g_pIpc->GetScript(), size);
-            req.Type = (ScriptType)g_pIpc->Fields.ScriptType;
-
-            g_pIpc->Fields.Status = (uint32_t)IpcStatus::Executing;
-            return req;
-        }
+    if (g_pIpc->Fields.Status == (uint32_t)IpcStatus::CmdPending) {
+        uint32_t size = g_pIpc->Fields.ScriptSize;
+        if (size > IPC_MAX_SCRIPT) size = IPC_MAX_SCRIPT;
+        memcpy(outScript, g_pIpc->GetScript(), size);
+        outScript[size] = 0;
+        *outSize = size;
+        *outType = g_pIpc->Fields.ScriptType;
+        g_pIpc->Fields.Status = (uint32_t)IpcStatus::Executing;
+        return 1;
     }
+    return 0;
 }
 
-static void SendOutput(const std::string& output) {
-    uint32_t outSize = (uint32_t)output.size();
-    if (outSize > IPC_MAX_OUTPUT) outSize = IPC_MAX_OUTPUT;
-
-    g_pIpc->WriteOutput((const uint8_t*)output.c_str(), outSize);
+static void SendOutput(const char* output, uint32_t size) {
+    if (size > IPC_MAX_OUTPUT) size = IPC_MAX_OUTPUT;
+    g_pIpc->WriteOutput((const uint8_t*)output, size);
     g_pIpc->Fields.Status = (uint32_t)IpcStatus::Done;
     SetEvent(g_hEventRes);
 }
 
-static void SendError(const std::string& error) {
-    std::string errMsg = "[Error] " + error;
-    uint32_t outSize = (uint32_t)errMsg.size();
-    if (outSize > IPC_MAX_OUTPUT) outSize = IPC_MAX_OUTPUT;
-
-    g_pIpc->WriteOutput((const uint8_t*)errMsg.c_str(), outSize);
+static void SendError(const char* error) {
+    char errMsg[IPC_MAX_OUTPUT];
+    int len = sprintf_s(errMsg, sizeof(errMsg), "[Error] %s", error);
+    if (len < 0) len = 0;
+    SendOutput(errMsg, (uint32_t)len);
     g_pIpc->Fields.Status = (uint32_t)IpcStatus::Error;
     SetEvent(g_hEventRes);
 }
