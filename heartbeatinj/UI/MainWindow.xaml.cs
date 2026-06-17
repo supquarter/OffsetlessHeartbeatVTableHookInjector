@@ -86,7 +86,6 @@ namespace InjectorUI
             try
             {
                 _injector = new InjectorProcess(injectorPath);
-                _injector.OnOutput += (line) => Dispatcher.Invoke(() => Log(line));
                 _injector.OnExit += (code) => Dispatcher.Invoke(() => OnInjectorExited(code));
 
                 string? modulePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "module.dll");
