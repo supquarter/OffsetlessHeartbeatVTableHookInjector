@@ -161,8 +161,6 @@ int main() {
     }
 
     Prot(deBase, 0x1000, PAGE_EXECUTE_READWRITE);
-    std::vector<BYTE> z(0x1000, 0);
-    Write(deBase, z.data(), z.size());
 
     std::vector<BYTE> sc = ExtSc((uintptr_t)Hook);
     RepSc(sc, 0x100000000ULL, g_Shared);
@@ -189,8 +187,6 @@ int main() {
     }
     uintptr_t msBase = (uintptr_t)msme.modBaseAddr;
     Prot(msBase, msme.modBaseSize, PAGE_EXECUTE_READWRITE);
-    z = std::vector<BYTE>(msme.modBaseSize, 0);
-    Write(msBase, z.data(), z.size());
 
     g_DllBase = msBase;
     g_DllSz = DllSz(g_DllPath);
