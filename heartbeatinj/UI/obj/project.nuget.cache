@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "LuR5l58UVwo=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\supquarter\\Documents\\OffsetlessHeartbeatVTableHookInjector\\heartbeatinj\\UI\\InjectorUI.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\supquarter\\.nuget\\packages\\microsoft.web.webview2\\1.0.2903.40\\microsoft.web.webview2.1.0.2903.40.nupkg.sha512"
+  ],
+  "logs": []
+}
