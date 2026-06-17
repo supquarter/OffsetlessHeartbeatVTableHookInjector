@@ -19,4 +19,9 @@
     </None>
   </ItemGroup>
 
+  <Target Name="CopyInjectorDeps" AfterTargets="Build">
+    <Copy SourceFiles="..\build\injector.exe" DestinationFolder="$(OutputPath)" Condition="Exists('..\build\injector.exe')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\build\module.dll" DestinationFolder="$(OutputPath)" Condition="Exists('..\build\module.dll')" SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

@@ -75,61 +75,76 @@ uintptr_t FindPlayerListManager(HANDLE process_handle, uintptr_t rbBase, uintptr
 
     MEMORY_BASIC_INFORMATION mbi;
 
-    printf("[*] Scanning memory for PlayerListManager (class name 'Players')...\n");
+    printf("[*] Scanning memory for PlayerListManager (class 'Players')...\n");
     int regionsChecked = 0;
+    const size_t CHUNK = 0x10000; // 64KB chunks
+
+    std::vector<BYTE> buffer(CHUNK);
 
     while (start_address < end_address) {
-        if (VirtualQueryEx(process_handle, (LPCVOID)start_address, &mbi, sizeof(mbi))) {
-            if ((mbi.State == MEM_COMMIT) && (mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE)) && !(mbi.Protect & PAGE_GUARD)) {
-                size_t region_size = mbi.RegionSize;
-                std::vector<BYTE> buffer(region_size);
+        if (!VirtualQueryEx(process_handle, (LPCVOID)start_address, &mbi, sizeof(mbi))) {
+            start_address += 0x1000;
+            continue;
+        }
 
-                if (g_Syscall.SyscallRead(process_handle, start_address, buffer.data(), region_size)) {
-                    for (size_t i = 0; i < region_size - 0x80; i += 8) {
-                        uintptr_t inst = *reinterpret_cast<uintptr_t*>(&buffer[i]);
+        if (!(mbi.State == MEM_COMMIT) || !(mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE)) || (mbi.Protect & PAGE_GUARD)) {
+            start_address += mbi.RegionSize;
+            continue;
+        }
 
-                        if (inst < 0x10000 || inst >= 0x7FFFFFFFFFFF) continue;
+        size_t region_size = mbi.RegionSize;
+        if (region_size > 0x4000000) region_size = 0x4000000; // cap at 64MB
 
-                        uintptr_t classDesc = 0;
-                        if (!g_Syscall.SyscallRead(process_handle, inst + 0x18, &classDesc, sizeof(classDesc)))
-                            continue;
+        uintptr_t region_base = start_address;
+        for (size_t offset = 0; offset < region_size; offset += CHUNK) {
+            size_t read_size = CHUNK;
+            if (read_size > region_size - offset) read_size = region_size - offset;
+            if (read_size < 0x100) continue;
 
-                        if (classDesc < 0x10000 || classDesc >= 0x7FFFFFFFFFFF) continue;
+            if (!g_Syscall.SyscallRead(process_handle, region_base + offset, buffer.data(), read_size))
+                continue;
 
-                        char className[32] = { 0 };
-                        if (!g_Syscall.SyscallRead(process_handle, classDesc + 0x08, className, sizeof(className)))
-                            continue;
+            for (size_t i = 0; i < read_size - 0x80; i += 8) {
+                uintptr_t inst = *reinterpret_cast<uintptr_t*>(&buffer[i]);
+                if (inst < 0x10000 || inst >= 0x7FFFFFFFFFFF) continue;
 
-                        if (strcmp(className, "Players") != 0) continue;
+                uintptr_t classDesc = 0;
+                if (!g_Syscall.SyscallRead(process_handle, inst + 0x18, &classDesc, sizeof(classDesc)))
+                    continue;
+                if (classDesc < 0x10000 || classDesc >= 0x7FFFFFFFFFFF) continue;
 
-                        uintptr_t parent = 0;
-                        g_Syscall.SyscallRead(process_handle, inst + 0x70, &parent, sizeof(parent));
-                        if (parent >= 0x10000 && parent < 0x7FFFFFFFFFFF) {
-                            uintptr_t parentCD = 0;
-                            if (g_Syscall.SyscallRead(process_handle, parent + 0x18, &parentCD, sizeof(parentCD))) {
-                                char parentName[32] = { 0 };
-                                if (g_Syscall.SyscallRead(process_handle, parentCD + 0x08, parentName, sizeof(parentName))) {
-                                    if (strcmp(parentName, "DataModel") == 0) {
-                                        printf("[+] Found PlayerListManager at 0x%p (parent: DataModel)\n", (void*)inst);
-                                        return inst;
-                                    }
-                                }
+                char className[32] = { 0 };
+                if (!g_Syscall.SyscallRead(process_handle, classDesc + 0x08, className, sizeof(className)))
+                    continue;
+
+                if (strcmp(className, "Players") != 0) continue;
+
+                uintptr_t parent = 0;
+                g_Syscall.SyscallRead(process_handle, inst + 0x70, &parent, sizeof(parent));
+                if (parent >= 0x10000 && parent < 0x7FFFFFFFFFFF) {
+                    uintptr_t parentCD = 0;
+                    if (g_Syscall.SyscallRead(process_handle, parent + 0x18, &parentCD, sizeof(parentCD))) {
+                        char parentName[32] = { 0 };
+                        if (g_Syscall.SyscallRead(process_handle, parentCD + 0x08, parentName, sizeof(parentName))) {
+                            if (strcmp(parentName, "DataModel") == 0) {
+                                printf("[+] Found PlayerListManager at 0x%p (parent: DataModel)\n", (void*)inst);
+                                return inst;
                             }
                         }
-
-                        printf("[*] Found 'Players' instance at 0x%p (parent not DataModel, checking anyway)\n", (void*)inst);
-                        return inst;
                     }
                 }
-                regionsChecked++;
-                if (regionsChecked % 50 == 0) {
-                    printf("[*] Scanned %d regions...\n", regionsChecked);
-                }
+
+                printf("[*] Found 'Players' instance at 0x%p, using it\n", (void*)inst);
+                return inst;
             }
-            start_address += mbi.RegionSize;
-        } else {
-            start_address += 0x1000;
         }
+
+        regionsChecked++;
+        if (regionsChecked % 25 == 0) {
+            printf("[*] Scanned %d regions, currently at 0x%p...\n", regionsChecked, (void*)start_address);
+        }
+
+        start_address += mbi.RegionSize;
     }
 
     printf("[-] Could not find PlayerListManager after scanning %d regions.\n", regionsChecked);
