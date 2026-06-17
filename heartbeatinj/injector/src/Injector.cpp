@@ -9,8 +9,6 @@ uintptr_t Hook(uintptr_t a1, uintptr_t a2, uintptr_t a3) {
     auto s = (Shared*)0x100000000;
     if (s->Status == State::Load) {
         s->Status = State::Wait;
-        char m[] = { 'm', 's', 'h', 't', 'm', 'l', '.', 'd', 'l', 'l', '\0' };
-        s->LdrEx(m, NULL, DONT_RESOLVE_DLL_REFERENCES);
     }
     if (s->Status == State::Inject) {
         auto d = s->dllSt;
@@ -55,11 +53,9 @@ uintptr_t Hook(uintptr_t a1, uintptr_t a2, uintptr_t a3) {
 uintptr_t FindHeartbeatJob(HANDLE process_handle) {
     SYSTEM_INFO sys_info;
     GetSystemInfo(&sys_info);
-
     uintptr_t start_address = (uintptr_t)sys_info.lpMinimumApplicationAddress;
     uintptr_t end_address = (uintptr_t)sys_info.lpMaximumApplicationAddress;
     MEMORY_BASIC_INFORMATION mbi;
-
     while (start_address < end_address) {
         if (VirtualQueryEx(process_handle, (LPCVOID)start_address, &mbi, sizeof(mbi))) {
             if ((mbi.State == MEM_COMMIT) && (mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE)) && !(mbi.Protect & PAGE_GUARD)) {
@@ -71,18 +67,14 @@ uintptr_t FindHeartbeatJob(HANDLE process_handle) {
                         if (potential_ptr >= 0x10000 && potential_ptr < 0x7FFFFFFFFFFF) {
                             char possible_name[32]{ 0 };
                             if (g_Syscall.SyscallRead(process_handle, potential_ptr + 0x18, possible_name, sizeof(possible_name))) {
-                                if (strcmp(possible_name, "Heartbeat") == 0) {
-                                    return potential_ptr;
-                                }
+                                if (strcmp(possible_name, "Heartbeat") == 0) return potential_ptr;
                             }
                         }
                     }
                 }
             }
             start_address += mbi.RegionSize;
-        } else {
-            start_address += 0x1000;
-        }
+        } else { start_address += 0x1000; }
     }
     return 0;
 }
@@ -97,76 +89,53 @@ int main() {
         printf("[-] module.dll not found at %s\n", g_DllPath.c_str());
         return 1;
     }
-
     g_pid = GetPid("RobloxPlayerBeta.exe");
-    if (!g_pid) {
-        printf("[-] RobloxPlayerBeta.exe not found.\n");
-        return 1;
-    }
-
-    if (!ensure_proc_handle()) {
-        printf("[-] No valid process handle, exiting.\n");
-        return 1;
-    }
-
+    if (!g_pid) { printf("[-] RobloxPlayerBeta.exe not found.\n"); return 1; }
+    if (!ensure_proc_handle()) { printf("[-] No valid process handle.\n"); return 1; }
     printf("[+] Roblox PID: %u\n", g_pid);
 
     std::vector<MODULEENTRY32> mods;
     GetMods(g_pid, { "devenum.dll", "RobloxPlayerBeta.exe", "KERNELBASE.dll", "KERNEL32.dll", "ntdll.dll" }, mods);
-
     if (mods.size() < 5 || !mods[0].modBaseAddr || !mods[1].modBaseAddr) {
-        printf("[-] Failed to enumerate modules.\n");
-        return 1;
+        printf("[-] Failed to enumerate modules.\n"); return 1;
     }
-
     uintptr_t deBase = (uintptr_t)mods[0].modBaseAddr;
     uintptr_t rbBase = (uintptr_t)mods[1].modBaseAddr;
     uintptr_t kbBase = (uintptr_t)mods[2].modBaseAddr;
     uintptr_t k3Base = (uintptr_t)mods[3].modBaseAddr;
     uintptr_t ntBase = (uintptr_t)mods[4].modBaseAddr;
-
     printf("[+] RobloxPlayerBeta.exe: 0x%p (size: 0x%X)\n", (void*)rbBase, mods[1].modBaseSize);
     printf("[+] devenum.dll: 0x%p\n", (void*)deBase);
 
-    printf("[*] Scanning memory for Heartbeat job...\n");
+    printf("[*] Scanning for Heartbeat job...\n");
     uintptr_t hbkJ = FindHeartbeatJob(g_process);
-
-    if (!hbkJ) {
-        printf("[-] Could not find Heartbeat job address.\n");
-        return 1;
-    }
-
-    printf("[+] Heartbeat job address found: 0x%p\n", (void*)hbkJ);
+    if (!hbkJ) { printf("[-] Heartbeat job not found.\n"); return 1; }
+    printf("[+] Heartbeat job: 0x%p\n", (void*)hbkJ);
 
     uintptr_t oVab = Read<uintptr_t>(hbkJ);
-    printf("[+] Heartbeat VTable address: 0x%p\n", (void*)oVab);
-
+    printf("[+] Heartbeat VTable: 0x%p\n", (void*)oVab);
     uintptr_t oHbk = Read<uintptr_t>(oVab + 8);
-    printf("[+] Original Heartbeat function: 0x%p\n", (void*)oHbk);
+    printf("[+] Original Heartbeat fn: 0x%p\n", (void*)oHbk);
 
     uintptr_t nVab = Alloc(0x300, PAGE_READWRITE);
-    if (!nVab) {
-        printf("[-] Failed to allocate fake vtable.\n");
-        return 1;
-    }
-
-    for (uintptr_t i = 0; i < 0x300; i += 8) {
+    if (!nVab) { printf("[-] Alloc fake vtable failed.\n"); return 1; }
+    for (uintptr_t i = 0; i < 0x300; i += 8)
         Write<uintptr_t>(nVab + i, Read<uintptr_t>(oVab + i));
-    }
 
     g_Shared = Alloc(sizeof(Shared), PAGE_READWRITE);
-    if (!g_Shared) {
-        printf("[-] Failed to allocate Shared struct.\n");
-        return 1;
-    }
+    if (!g_Shared) { printf("[-] Alloc Shared failed.\n"); return 1; }
 
     Prot(deBase, 0x1000, PAGE_EXECUTE_READWRITE);
-
     std::vector<BYTE> sc = ExtSc((uintptr_t)Hook);
     RepSc(sc, 0x100000000ULL, g_Shared);
     Write(deBase, sc.data(), sc.size());
-
     Write<uintptr_t>(nVab + 8, deBase);
+
+    g_DllSz = DllSz(g_DllPath);
+    uintptr_t modBase = Alloc(g_DllSz + 0x1000, PAGE_EXECUTE_READWRITE);
+    if (!modBase) { printf("[-] Alloc module memory failed.\n"); return 1; }
+    printf("[+] Module memory allocated: 0x%p (size: 0x%zX)\n", (void*)modBase, g_DllSz);
+    g_DllBase = modBase;
 
     Shared loc = {};
     loc.OrgHook = (fHbk)oHbk;
@@ -178,25 +147,17 @@ int main() {
     Write(g_Shared, &loc, sizeof(Shared));
 
     Write<uintptr_t>(hbkJ, nVab);
-    printf("[+] Heartbeat vtable redirected. Waiting for hook to fire...\n");
+    printf("[+] Vtable redirected. Waiting for hook...\n");
 
-    MODULEENTRY32 msme = {};
-    while (!msme.modBaseAddr) {
-        msme = GetMod(g_pid, "mshtml.dll");
-        Sleep(250);
-    }
-    uintptr_t msBase = (uintptr_t)msme.modBaseAddr;
-    Prot(msBase, msme.modBaseSize, PAGE_EXECUTE_READWRITE);
+    WaitSt(State::Wait);
+    printf("[+] Hook fired. Mapping module...\n");
 
-    g_DllBase = msBase;
-    g_DllSz = DllSz(g_DllPath);
     SH(dllSt, g_DllBase);
     SH(dllEd, g_DllBase + g_DllSz);
     mapr::Map(g_DllPath);
     mapr::Inj();
 
     Write<uintptr_t>(hbkJ, oVab);
-    printf("[+] Original vtable restored. Injection complete.\n");
-
+    printf("[+] Injection complete.\n");
     return 0;
 }

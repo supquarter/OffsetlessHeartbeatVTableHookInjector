@@ -18,27 +18,22 @@ DWORD WINAPI IpcWorkerThread(LPVOID) {
             continue;
 
         CosmicState* L = Luau::FindLuaState();
-        if (!L)
-            L = (CosmicState*)Luau::GetLuaStateViaFunction();
+        if (!L) L = (CosmicState*)Luau::GetLuaStateViaFunction();
 
-        if (!L) {
-            IPC::SendError("Failed to find Lua state");
-            continue;
-        }
+        if (!L) { IPC::SendError("No Lua state"); continue; }
 
         int result = -1;
-        if (scriptType == (uint32_t)ScriptType::Source) {
+        if (scriptType == (uint32_t)ScriptType::Source)
             result = Luau::ExecuteSource(L, scriptBuf, "=UI_Script");
-        } else if (scriptType == (uint32_t)ScriptType::Bytecode) {
+        else
             result = Luau::ExecuteBytecode(L, (const uint8_t*)scriptBuf, scriptSize, "=UI_Bytecode");
-        }
 
         const char* output = Luau::GetOutput();
         uint32_t outLen = Luau::g_OutputLen;
 
         if (result != 0 && outLen == 0) {
             char errBuf[64];
-            int len = sprintf_s(errBuf, sizeof(errBuf), "Script failed with code %d", result);
+            int len = sprintf_s(errBuf, sizeof(errBuf), "Script failed: %d", result);
             IPC::SendOutput(errBuf, len > 0 ? (uint32_t)len : 0);
         } else {
             IPC::SendOutput(output, outLen);
@@ -49,11 +44,20 @@ DWORD WINAPI IpcWorkerThread(LPVOID) {
 
 void InitializeModule() {
     if (!IPC::Create()) return;
+
+    MessageBoxA(NULL, "IPC created, initializing Luau...", "Module", MB_OK);
+
     if (!Luau::Initialize()) {
-        IPC::SendError("Luau init failed");
+        IPC::SendError("Luau init failed - offsets may be wrong for this Roblox version");
         return;
     }
+
+    MessageBoxA(NULL, "Luau initialized, installing hooks...", "Module", MB_OK);
+
     Hooks::Install();
+
+    MessageBoxA(NULL, "Module ready - waiting for scripts", "Module", MB_OK);
+
     CreateThread(NULL, 0, IpcWorkerThread, NULL, 0, NULL);
 }
 
